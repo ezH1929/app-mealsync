@@ -1,0 +1,35 @@
+[
+  {
+    "id": "user_001",
+    "displayName": "Asha Sharma",
+    "email": "asha@example.com",
+    "office_status": "IN_OFFICE",
+    "diet_profile": [
+      "Veg"
+    ],
+    "allergies": [
+      "nuts"
+    ],
+    "fasting": false,
+    "bookmarked_items": [
+      "item_001",
+      "item_003"
+    ],
+    "last_nudge_shown": null,
+    "created_at": "2025-11-19T00:00:00Z"
+  },
+  {
+    "id": "user_002",
+    "displayName": "Rajesh Kumar",
+    "email": "rajesh@example.com",
+    "office_status": "IN_OFFICE",
+    "diet_profile": [
+      "Non-Veg"
+    ],
+    "allergies": [],
+    "fasting": false,
+    "bookmarked_items": [],
+    "last_nudge_shown": "2025-11-19T18:09:41.653Z",
+    "created_at": "2025-11-19T00:00:00Z"
+  }
+]

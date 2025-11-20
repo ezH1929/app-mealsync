@@ -1,0 +1,20 @@
+[
+  {
+    "id": "2025-11-19",
+    "date": "2025-11-19",
+    "title": "Menu — Nov 19, 2025",
+    "published": true,
+    "created_at": "2025-11-19T00:00:00Z",
+    "festival_tag": "Navratri",
+    "festival_note": "Navratri special menu — fasting options highlighted."
+  },
+  {
+    "id": "2025-11-20",
+    "date": "2025-11-20",
+    "title": "Menu — Nov 20, 2025",
+    "published": true,
+    "created_at": "2025-11-20T00:00:00Z",
+    "festival_tag": null,
+    "festival_note": null
+  }
+]
