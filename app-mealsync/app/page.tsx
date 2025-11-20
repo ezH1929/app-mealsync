@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   Search, Bookmark, ChevronRight, X, Star, Leaf, 
   AlertTriangle, Calendar, User, LogOut, Utensils, CheckCircle,
-  Plus, Minus, Trophy, ShoppingBag
+  Plus, Minus, Trophy, ShoppingBag, Clock, MapPin, Users, Package
 } from 'lucide-react';
 import Toast from '@/components/Toast';
 import { cn, getTodayString, getTomorrowString, isPastCutoff } from '@/lib/utils';
@@ -68,8 +68,61 @@ interface OrderEntry {
   quantity: number;
   price: number;
   date: string;
-  type: 'surplus';
+  type: 'surplus' | 'meeting';
+  meetingId?: string;
+  deliveryOption?: 'silent' | 'notify';
+  deliveryTime?: string;
+  status?: 'preparing' | 'out-for-delivery' | 'delivered';
 }
+
+interface Meeting {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  attendees: number;
+  location: string;
+}
+
+interface MeetingOrder {
+  id: string;
+  meetingId: string;
+  items: { itemId: string; itemName: string; quantity: number; price: number }[];
+  totalPrice: number;
+  deliveryOption: 'silent' | 'notify';
+  deliveryTime?: string;
+  status: 'preparing' | 'out-for-delivery' | 'delivered';
+  createdAt: string;
+  confirmedAt?: string;
+}
+
+// Mock Meetings Data
+const mockMeetings: Meeting[] = [
+  {
+    id: "meet_001",
+    title: "Q4 Planning Review",
+    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2 hours from now
+    endTime: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
+    attendees: 8,
+    location: "Conference Room A"
+  },
+  {
+    id: "meet_002",
+    title: "Design Sprint Kickoff",
+    startTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), // 4 hours from now
+    endTime: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+    attendees: 5,
+    location: "Meeting Room 3"
+  },
+  {
+    id: "meet_003",
+    title: "Client Presentation",
+    startTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // Tomorrow
+    endTime: new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString(),
+    attendees: 12,
+    location: "Board Room"
+  }
+];
 
 // Mock Leaderboard Data
 const mockLeaderboard = [
@@ -103,6 +156,12 @@ export default function MealSyncApp() {
   const [showOrdersModal, setShowOrdersModal] = useState(false);
   const [allPrebooks, setAllPrebooks] = useState<PrebookData[]>([]);
   const [orderHistory, setOrderHistory] = useState<OrderEntry[]>([]);
+  const [showMeetingBooking, setShowMeetingBooking] = useState(false);
+  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [meetingCart, setMeetingCart] = useState<{ item: MenuItem; quantity: number }[]>([]);
+  const [meetingOrders, setMeetingOrders] = useState<MeetingOrder[]>([]);
+  const [deliveryOption, setDeliveryOption] = useState<'silent' | 'notify'>('notify');
+  const [customDeliveryTime, setCustomDeliveryTime] = useState('');
 
   const devMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const todayString = getTodayString();
@@ -119,6 +178,11 @@ export default function MealSyncApp() {
     const savedOrders = localStorage.getItem('mealsync_orders');
     if (savedOrders) {
       setOrderHistory(JSON.parse(savedOrders));
+    }
+
+    const savedMeetingOrders = localStorage.getItem('mealsync_meeting_orders');
+    if (savedMeetingOrders) {
+      setMeetingOrders(JSON.parse(savedMeetingOrders));
     }
   }, []);
 
@@ -335,6 +399,113 @@ export default function MealSyncApp() {
     localStorage.setItem('mealsync_user', JSON.stringify(updatedUser));
   };
 
+  const handleAddToMeetingCart = (item: MenuItem, quantity: number) => {
+    const existingIndex = meetingCart.findIndex(c => c.item.id === item.id);
+    if (existingIndex >= 0) {
+      const updated = [...meetingCart];
+      updated[existingIndex].quantity += quantity;
+      setMeetingCart(updated);
+    } else {
+      setMeetingCart([...meetingCart, { item, quantity }]);
+    }
+    setToast({ message: `Added ${item.name} to meeting cart`, type: 'success' });
+  };
+
+  const handleRemoveFromMeetingCart = (itemId: string) => {
+    setMeetingCart(meetingCart.filter(c => c.item.id !== itemId));
+  };
+
+  const handlePlaceMeetingOrder = () => {
+    if (!selectedMeeting || meetingCart.length === 0) return;
+
+    const order: MeetingOrder = {
+      id: `meeting_order_${Date.now()}`,
+      meetingId: selectedMeeting.id,
+      items: meetingCart.map(c => ({
+        itemId: c.item.id,
+        itemName: c.item.name,
+        quantity: c.quantity,
+        price: c.item.price
+      })),
+      totalPrice: meetingCart.reduce((sum, c) => sum + (c.item.price * c.quantity), 0),
+      deliveryOption,
+      deliveryTime: customDeliveryTime || undefined,
+      status: 'preparing',
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedOrders = [...meetingOrders, order];
+    setMeetingOrders(updatedOrders);
+    localStorage.setItem('mealsync_meeting_orders', JSON.stringify(updatedOrders));
+
+    // Add to order history
+    const historyEntry: OrderEntry = {
+      id: order.id,
+      itemName: `Meeting: ${selectedMeeting.title}`,
+      quantity: meetingCart.reduce((sum, c) => sum + c.quantity, 0),
+      price: order.totalPrice,
+      date: order.createdAt,
+      type: 'meeting',
+      meetingId: selectedMeeting.id,
+      deliveryOption: order.deliveryOption,
+      deliveryTime: order.deliveryTime,
+      status: order.status
+    };
+    const updatedHistory = [...orderHistory, historyEntry];
+    setOrderHistory(updatedHistory);
+    localStorage.setItem('mealsync_orders', JSON.stringify(updatedHistory));
+
+    setToast({ message: 'Meeting refreshments ordered successfully!', type: 'success' });
+    setMeetingCart([]);
+    setShowMeetingBooking(false);
+    setSelectedMeeting(null);
+    setDeliveryOption('notify');
+    setCustomDeliveryTime('');
+
+    // Simulate status changes
+    setTimeout(() => {
+      updateOrderStatus(order.id, 'out-for-delivery');
+    }, 5000);
+  };
+
+  const updateOrderStatus = (orderId: string, status: 'preparing' | 'out-for-delivery' | 'delivered') => {
+    const updatedMeetingOrders = meetingOrders.map(o => 
+      o.id === orderId ? { ...o, status } : o
+    );
+    setMeetingOrders(updatedMeetingOrders);
+    localStorage.setItem('mealsync_meeting_orders', JSON.stringify(updatedMeetingOrders));
+
+    const updatedHistory = orderHistory.map(o => 
+      o.id === orderId ? { ...o, status } : o
+    );
+    setOrderHistory(updatedHistory);
+    localStorage.setItem('mealsync_orders', JSON.stringify(updatedHistory));
+
+    const statusMessages = {
+      'out-for-delivery': 'Your order is out for delivery!',
+      'delivered': 'Your order has been delivered!'
+    };
+    if (status !== 'preparing') {
+      setToast({ message: statusMessages[status], type: 'info' });
+    }
+
+    // Auto-progress to next status
+    if (status === 'out-for-delivery') {
+      setTimeout(() => {
+        updateOrderStatus(orderId, 'delivered');
+      }, 10000);
+    }
+  };
+
+  const handleConfirmReceipt = (orderId: string) => {
+    const updatedMeetingOrders = meetingOrders.map(o => 
+      o.id === orderId ? { ...o, confirmedAt: new Date().toISOString() } : o
+    );
+    setMeetingOrders(updatedMeetingOrders);
+    localStorage.setItem('mealsync_meeting_orders', JSON.stringify(updatedMeetingOrders));
+    setToast({ message: 'Receipt confirmed! Thank you.', type: 'success' });
+  };
+
   const toggleFilter = (filter: string) => {
     if (filter === 'All') {
       setActiveFilters(['All']);
@@ -466,6 +637,7 @@ export default function MealSyncApp() {
     onMeetingChange: setMeetingSimulation,
     onLeaderboardClick: () => setShowLeaderboard(true),
     onOrdersClick: () => setShowOrdersModal(true),
+    onMeetingBookingClick: () => setShowMeetingBooking(true),
   };
 
   if (showFastingView) {
@@ -507,7 +679,8 @@ export default function MealSyncApp() {
                   onPrebook={(id: string, qty: number) => handlePrebook(item.category, id, qty)}
                   isPrebooked={isPrebookPrebooked(item.id)}
                   hasPrebook={!!prebookData}
-                  onBuyNow={(qty: number) => handleDirectBuy(item, qty)}
+                  onBuyNow={null}
+                  isFastingView={true}
                 />
               ))}
             </div>
@@ -544,6 +717,31 @@ export default function MealSyncApp() {
                 bookings={allPrebooks}
                 orders={orderHistory}
                 onCancel={handleCancelPrebook}
+                meetingOrders={meetingOrders}
+                onConfirmReceipt={handleConfirmReceipt}
+            />
+        )}
+
+        {showMeetingBooking && (
+            <MeetingBookingModal 
+                onClose={() => {
+                  setShowMeetingBooking(false);
+                  setSelectedMeeting(null);
+                  setMeetingCart([]);
+                }}
+                meetings={mockMeetings}
+                selectedMeeting={selectedMeeting}
+                onSelectMeeting={setSelectedMeeting}
+                availableItems={items.filter(item => item.is_active && item.available_qty > 0)}
+                cart={meetingCart}
+                onAddToCart={handleAddToMeetingCart}
+                onRemoveFromCart={handleRemoveFromMeetingCart}
+                deliveryOption={deliveryOption}
+                onDeliveryOptionChange={setDeliveryOption}
+                customDeliveryTime={customDeliveryTime}
+                onCustomDeliveryTimeChange={setCustomDeliveryTime}
+                onPlaceOrder={handlePlaceMeetingOrder}
+                meetingOrders={meetingOrders}
             />
         )}
 
@@ -743,6 +941,31 @@ export default function MealSyncApp() {
               bookings={allPrebooks}
               orders={orderHistory}
               onCancel={handleCancelPrebook}
+              meetingOrders={meetingOrders}
+              onConfirmReceipt={handleConfirmReceipt}
+          />
+      )}
+
+      {showMeetingBooking && (
+          <MeetingBookingModal 
+              onClose={() => {
+                setShowMeetingBooking(false);
+                setSelectedMeeting(null);
+                setMeetingCart([]);
+              }}
+              meetings={mockMeetings}
+              selectedMeeting={selectedMeeting}
+              onSelectMeeting={setSelectedMeeting}
+              availableItems={items.filter(item => item.is_active && item.available_qty > 0)}
+              cart={meetingCart}
+              onAddToCart={handleAddToMeetingCart}
+              onRemoveFromCart={handleRemoveFromMeetingCart}
+              deliveryOption={deliveryOption}
+              onDeliveryOptionChange={setDeliveryOption}
+              customDeliveryTime={customDeliveryTime}
+              onCustomDeliveryTimeChange={setCustomDeliveryTime}
+              onPlaceOrder={handlePlaceMeetingOrder}
+              meetingOrders={meetingOrders}
           />
       )}
 
@@ -763,6 +986,7 @@ function Header({
   onMeetingChange,
   onLeaderboardClick,
   onOrdersClick,
+  onMeetingBookingClick,
 }: any) {
   const today = getTodayString();
   const tomorrow = getTomorrowString();
@@ -832,6 +1056,15 @@ function Header({
                </button>
 
               <button
+                onClick={onMeetingBookingClick}
+                className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center gap-2 text-sm font-medium shadow-md"
+                title="Book Meeting Refreshments"
+               >
+                 <Utensils size={16} />
+                 <span className="hidden md:inline">Meeting</span>
+               </button>
+
+              <button
                 onClick={onPrebookClick}
                 className={cn(
                   "px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-sm shadow-lg hover:shadow-xl hover:scale-105 active:scale-95",
@@ -859,9 +1092,10 @@ function Header({
   );
 }
 
-function OrdersModal({ onClose, bookings, orders, onCancel }: any) {
+function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onConfirmReceipt }: any) {
     const sortedBookings = [...bookings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const sortedOrders = [...orders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const sortedMeetingOrders = [...(meetingOrders || [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return (
         <div
@@ -930,15 +1164,73 @@ function OrdersModal({ onClose, bookings, orders, onCancel }: any) {
                 </section>
 
                 <section>
+                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Meeting Orders</h3>
+                    {sortedMeetingOrders.length === 0 ? (
+                        <div className="text-center py-6 text-gray-500 border border-dashed border-gray-200 rounded-xl">
+                            <Utensils size={32} className="mx-auto mb-2 text-gray-300" />
+                            <p>No meeting orders yet.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                            {sortedMeetingOrders.map(order => {
+                                const statusConfig = {
+                                    'preparing': { label: 'Preparing', color: 'text-yellow-600 bg-yellow-50', icon: Clock },
+                                    'out-for-delivery': { label: 'Out for Delivery', color: 'text-blue-600 bg-blue-50', icon: Package },
+                                    'delivered': { label: 'Delivered', color: 'text-green-600 bg-green-50', icon: CheckCircle }
+                                };
+                                const config = statusConfig[order.status];
+                                const StatusIcon = config.icon;
+                                
+                                return (
+                                    <div key={order.id} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
+                                        <div className="flex justify-between items-start mb-2">
+                                            <div className="flex-1">
+                                                <p className="text-navy font-semibold text-sm mb-1">
+                                                    {order.items.map((item: any) => item.itemName).join(', ')}
+                                                </p>
+                                                <p className="text-xs text-gray-500">
+                                                    {new Date(order.createdAt).toLocaleString()}
+                                                </p>
+                                            </div>
+                                            <div className={cn("flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium", config.color)}>
+                                                <StatusIcon size={12} />
+                                                {config.label}
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100">
+                                            <div className="text-sm">
+                                                <span className="text-gray-600">Total: </span>
+                                                <span className="font-bold text-navy">₹{order.totalPrice}</span>
+                                            </div>
+                                            {order.status === 'delivered' && !order.confirmedAt && (
+                                                <button
+                                                    onClick={() => onConfirmReceipt(order.id)}
+                                                    className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-medium"
+                                                >
+                                                    Confirm Receipt
+                                                </button>
+                                            )}
+                                            {order.confirmedAt && (
+                                                <span className="text-xs text-green-600 font-medium">✓ Received</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </section>
+
+                <section>
                     <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent Surplus Purchases</h3>
-                    {sortedOrders.length === 0 ? (
+                    {sortedOrders.filter(o => o.type === 'surplus').length === 0 ? (
                         <div className="text-center py-6 text-gray-500 border border-dashed border-gray-200 rounded-xl">
                             <Leaf size={32} className="mx-auto mb-2 text-gray-300" />
                             <p>No surplus items purchased yet.</p>
                         </div>
                     ) : (
                         <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                            {sortedOrders.map(order => (
+                            {sortedOrders.filter(o => o.type === 'surplus').map(order => (
                                 <div key={order.id} className="bg-white rounded-xl p-4 border border-gray-100 flex justify-between items-center shadow-sm">
                                     <div>
                                         <p className="text-navy font-semibold">{order.itemName}</p>
@@ -946,7 +1238,7 @@ function OrdersModal({ onClose, bookings, orders, onCancel }: any) {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-sm font-bold text-gray-700">Qty: {order.quantity}</p>
-                                        <p className="text-xs text-green-600 font-semibold">\u20b9{order.price}</p>
+                                        <p className="text-xs text-green-600 font-semibold">₹{order.price}</p>
                                     </div>
                                 </div>
                             ))}
@@ -1020,7 +1312,7 @@ function FiltersBar({
   );
 }
 
-function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBookmark, onClick, onPrebook, isPrebooked, hasPrebook, onBuyNow }: any) {
+function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBookmark, onClick, onPrebook, isPrebooked, hasPrebook, onBuyNow, isFastingView = false }: any) {
   const isSoldOut = item.available_qty <= 0;
   const maxQuantity = Math.max(1, Math.min(item.available_qty, 5));
   const [quantity, setQuantity] = useState(1);
@@ -1148,7 +1440,7 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
             >
                 Details
             </button>
-            {item.is_surplus_candidate ? (
+            {item.is_surplus_candidate && !isFastingView && onBuyNow ? (
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
@@ -1555,6 +1847,321 @@ function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function MeetingBookingModal({ 
+  onClose, 
+  meetings, 
+  selectedMeeting, 
+  onSelectMeeting, 
+  availableItems, 
+  cart, 
+  onAddToCart, 
+  onRemoveFromCart,
+  deliveryOption,
+  onDeliveryOptionChange,
+  customDeliveryTime,
+  onCustomDeliveryTimeChange,
+  onPlaceOrder,
+  meetingOrders
+}: any) {
+  const [showItemSelector, setShowItemSelector] = useState(false);
+  const [itemQuantity, setItemQuantity] = useState(1);
+  const [selectedItemToAdd, setSelectedItemToAdd] = useState<MenuItem | null>(null);
+
+  const totalPrice = cart.reduce((sum: number, c: any) => sum + (c.item.price * c.quantity), 0);
+  const totalItems = cart.reduce((sum: number, c: any) => sum + c.quantity, 0);
+
+  const handleAddItem = (item: MenuItem) => {
+    setSelectedItemToAdd(item);
+    setItemQuantity(1);
+    setShowItemSelector(true);
+  };
+
+  const confirmAddItem = () => {
+    if (selectedItemToAdd) {
+      onAddToCart(selectedItemToAdd, itemQuantity);
+      setShowItemSelector(false);
+      setSelectedItemToAdd(null);
+      setItemQuantity(1);
+    }
+  };
+
+  const formatMeetingTime = (isoString: string) => {
+    return new Date(isoString).toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full border border-gray-100 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-6">
+          <div className="flex justify-between items-start sticky top-0 bg-white pb-4 border-b border-gray-100">
+            <div>
+              <p className="text-sm uppercase text-gray-400 tracking-wide font-semibold">Meeting Refreshments</p>
+              <h2 className="text-2xl font-heading text-navy">Book for Meeting</h2>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-navy">
+              <X size={24} />
+            </button>
+          </div>
+
+          {!selectedMeeting ? (
+            <div>
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Select Meeting</h3>
+              <div className="space-y-3">
+                {meetings.map((meeting: Meeting) => {
+                  const existingOrder = meetingOrders.find((o: MeetingOrder) => o.meetingId === meeting.id);
+                  
+                  return (
+                    <div
+                      key={meeting.id}
+                      onClick={() => !existingOrder && onSelectMeeting(meeting)}
+                      className={cn(
+                        "p-4 rounded-xl border-2 transition-all",
+                        existingOrder 
+                          ? "bg-green-50 border-green-200 cursor-not-allowed" 
+                          : "border-gray-200 hover:border-blue-400 hover:bg-blue-50 cursor-pointer"
+                      )}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h4 className="font-bold text-navy text-lg mb-2">{meeting.title}</h4>
+                          <div className="space-y-1 text-sm text-gray-600">
+                            <div className="flex items-center gap-2">
+                              <Clock size={14} className="text-gray-400" />
+                              <span>{formatMeetingTime(meeting.startTime)} - {formatMeetingTime(meeting.endTime)}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <MapPin size={14} className="text-gray-400" />
+                              <span>{meeting.location}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users size={14} className="text-gray-400" />
+                              <span>{meeting.attendees} attendees</span>
+                            </div>
+                          </div>
+                        </div>
+                        {existingOrder ? (
+                          <div className="flex items-center gap-2 bg-green-100 px-3 py-1 rounded-lg">
+                            <CheckCircle size={16} className="text-green-600" />
+                            <span className="text-green-800 font-medium text-sm">Ordered</span>
+                          </div>
+                        ) : (
+                          <ChevronRight className="text-gray-400" size={20} />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <h4 className="font-bold text-blue-900 text-lg">{selectedMeeting.title}</h4>
+                  <button
+                    onClick={() => onSelectMeeting(null)}
+                    className="text-blue-600 text-sm hover:underline"
+                  >
+                    Change
+                  </button>
+                </div>
+                <div className="flex items-center gap-4 text-sm text-blue-700 flex-wrap">
+                  <span className="flex items-center gap-1">
+                    <Clock size={14} />
+                    {formatMeetingTime(selectedMeeting.startTime)}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <MapPin size={14} />
+                    {selectedMeeting.location}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Users size={14} />
+                    {selectedMeeting.attendees}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Refreshments Cart</h3>
+                {cart.length === 0 ? (
+                  <div className="text-center py-8 border border-dashed border-gray-200 rounded-xl">
+                    <Package size={40} className="mx-auto mb-2 text-gray-300" />
+                    <p className="text-gray-500">No items in cart. Add items below.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    {cart.map((cartItem: any) => (
+                      <div
+                        key={cartItem.item.id}
+                        className="flex items-center justify-between bg-white p-3 rounded-lg"
+                      >
+                        <div className="flex-1">
+                          <p className="font-medium text-navy">{cartItem.item.name}</p>
+                          <p className="text-sm text-gray-500">
+                            {cartItem.quantity} x ₹{cartItem.item.price} = ₹{cartItem.quantity * cartItem.item.price}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => onRemoveFromCart(cartItem.item.id)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="pt-3 border-t border-gray-200 flex justify-between items-center">
+                      <span className="font-bold text-navy">Total ({totalItems} items)</span>
+                      <span className="text-2xl font-bold text-navy">₹{totalPrice}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Available Items</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-2">
+                  {availableItems.map((item: MenuItem) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
+                      onClick={() => handleAddItem(item)}
+                    >
+                      <div className="flex-1">
+                        <p className="font-medium text-navy text-sm">{item.name}</p>
+                        <p className="text-xs text-gray-500">₹{item.price}</p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddItem(item);
+                        }}
+                        className="p-1 bg-blue-100 text-blue-600 rounded-full hover:bg-blue-200"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Delivery Options</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="radio"
+                      id="silent"
+                      name="delivery"
+                      checked={deliveryOption === 'silent'}
+                      onChange={() => onDeliveryOptionChange('silent')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <label htmlFor="silent" className="flex-1 cursor-pointer">
+                      <p className="font-medium text-navy">Silent Delivery</p>
+                      <p className="text-sm text-gray-500">Leave at reception desk</p>
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="radio"
+                      id="notify"
+                      name="delivery"
+                      checked={deliveryOption === 'notify'}
+                      onChange={() => onDeliveryOptionChange('notify')}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <label htmlFor="notify" className="flex-1 cursor-pointer">
+                      <p className="font-medium text-navy">Notify on Delivery</p>
+                      <p className="text-sm text-gray-500">Send notification when delivered</p>
+                    </label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Preferred Delivery Time (Optional)
+                    </label>
+                    <input
+                      type="time"
+                      value={customDeliveryTime}
+                      onChange={(e) => onCustomDeliveryTimeChange(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={onPlaceOrder}
+                disabled={cart.length === 0}
+                className={cn(
+                  "w-full py-4 px-4 rounded-xl font-bold text-white transition-all shadow-lg",
+                  cart.length > 0
+                    ? "bg-blue-600 hover:bg-blue-700 hover:shadow-xl"
+                    : "bg-gray-300 cursor-not-allowed"
+                )}
+              >
+                Place Order - ₹{totalPrice}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showItemSelector && selectedItemToAdd && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]"
+          onClick={() => setShowItemSelector(false)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 max-w-sm w-full m-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-bold text-navy text-lg mb-4">{selectedItemToAdd.name}</h3>
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <button
+                onClick={() => setItemQuantity(Math.max(1, itemQuantity - 1))}
+                className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                <Minus size={20} />
+              </button>
+              <span className="text-2xl font-bold w-16 text-center">{itemQuantity}</span>
+              <button
+                onClick={() => setItemQuantity(itemQuantity + 1)}
+                className="p-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowItemSelector(false)}
+                className="flex-1 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAddItem}
+                className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
+              >
+                Add to Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

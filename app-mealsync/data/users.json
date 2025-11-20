@@ -28,7 +28,9 @@
     ],
     "allergies": [],
     "fasting": false,
-    "bookmarked_items": [],
+    "bookmarked_items": [
+      "item_002"
+    ],
     "last_nudge_shown": "2025-11-19T18:09:41.653Z",
     "created_at": "2025-11-19T00:00:00Z"
   }
