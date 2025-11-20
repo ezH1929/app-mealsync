@@ -1447,7 +1447,7 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
                         onBuyNow(quantity);
                     }}
                     disabled={isSoldOut}
-                    className="flex-1 py-2.5 rounded-lg font-bold uppercase tracking-wide transition-all text-sm flex items-center justify-center gap-2 bg-green-600 text-white hover:bg-green-700 shadow-md"
+                    className="flex-1 py-2.5 rounded-lg font-bold uppercase tracking-wide transition-all text-sm flex items-center justify-center gap-2 bg-green-600 text-black hover:bg-green-700 shadow-md"
                 >
                     Buy Now
                 </button>
@@ -1656,7 +1656,7 @@ function ItemDetailModal({
                             disabled={!canInteract}
                             className={cn(
                                 'w-full py-3.5 px-4 rounded-xl font-bold uppercase tracking-wide transition-all flex items-center justify-center gap-2 shadow-md',
-                                canInteract ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                canInteract ? 'bg-green-600 text-black hover:bg-green-700' : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                             )}
                          >
                             Buy Now (Direct)
