@@ -276,27 +276,22 @@ export default function MealSyncApp() {
     setShowLoginModal(true);
   };
 
-  const handleBookmark = async (itemId: string, isBookmarked: boolean) => {
+  const handleBookmark = (itemId: string, isBookmarked: boolean) => {
     if (!user) return;
 
     const action = isBookmarked ? 'remove' : 'add';
     
-    try {
-      const res = await fetch(`/api/user/${user.id}/bookmark`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemId, action }),
-      });
-      
-      const data = await res.json();
-      if (data.user) {
-        setUser(data.user);
-        localStorage.setItem('mealsync_user', JSON.stringify(data.user));
-        setToast({ message: data.message, type: 'success' });
-      }
-    } catch (error) {
-      setToast({ message: 'Failed to update bookmark', type: 'error' });
-    }
+    // Visual-only bookmark: Update local state without API call
+    const updatedBookmarks = isBookmarked 
+      ? user.bookmarked_items.filter((id: string) => id !== itemId)
+      : [...user.bookmarked_items, itemId];
+    
+    const updatedUser = { ...user, bookmarked_items: updatedBookmarks };
+    setUser(updatedUser);
+    localStorage.setItem('mealsync_user', JSON.stringify(updatedUser));
+    
+    const message = isBookmarked ? 'Removed from favourites' : 'Added to favourites';
+    setToast({ message, type: 'success' });
   };
 
   const handlePrebook = async (category: string, itemId: string | null = null, qty: number = 1) => {
@@ -306,7 +301,7 @@ export default function MealSyncApp() {
     const targetDate = selectedDate;
     const isToday = targetDate === getTodayString();
 
-    // Cutoff check for today's orders
+    // Cutoff check ONLY for today's orders
     if (isToday) {
         const cutoffHour = 10;
         const cutoffMinute = 30;
@@ -314,34 +309,7 @@ export default function MealSyncApp() {
             setToast({ message: 'Pre-booking closed for today (Cutoff 10:30 AM)', type: 'error' });
             return;
         }
-        // Also check if trying to prebook for today which is generally disabled unless surplus?
-        // The requirement says "pre-book cutoff time should be 10:30am for the same day".
-        // This implies prebooking IS allowed for today before 10:30am.
-        // BUT we previously added a check: "Cannot pre-book for today. Please order directly."
-        // If the user means "Buy Now" for today needs a cutoff, that's different.
-        // Assuming the requirement means: "You can pre-book for today until 10:30am, after that only Buy Now (Surplus) is allowed?"
-        // Or does it mean "You can't pre-book for today, and the cutoff logic applies to...?"
-        
-        // Re-reading: "for the same day, pre-book cutoff time should be 10:30am."
-        // This likely means if I am booking FOR today, I must do it before 10:30am.
-        // So we should remove the "Cannot pre-book for today" block if we want to allow it before 10:30.
     }
-    
-    // Only block if it is today AND past cutoff.
-    if (isToday) {
-        const cutoffHour = 10;
-        const cutoffMinute = 30;
-        if (isPastCutoff(cutoffHour, cutoffMinute)) {
-             setToast({ message: 'Pre-booking closed for today (Cutoff 10:30 AM). Check surplus items.', type: 'error' });
-             return;
-        }
-    }
-    
-    // Prevent prebooking for today check - REMOVED to allow prebooking before cutoff
-    // if (targetDate === getTodayString()) {
-    //    setToast({ message: 'Cannot pre-book for today. Please order directly.', type: 'error' });
-    //    return;
-    // }
 
     // Allow multiple prebooks - removed the check for existing prebookData
     // if (prebookData) { ... }
@@ -697,7 +665,6 @@ export default function MealSyncApp() {
     user: user!,
     selectedDate,
     onDateChange: setSelectedDate,
-    onPrebookClick: () => setShowPrebookModal(true),
     onLogout: handleLogout,
     prebookData,
     devMode,
@@ -1065,7 +1032,6 @@ function Header({
   user, 
   selectedDate, 
   onDateChange, 
-  onPrebookClick, 
   onLogout,
   prebookData,
   devMode,
@@ -1200,19 +1166,6 @@ function Header({
                  <Utensils size={16} />
                  <span className="hidden md:inline">Meeting</span>
                </button>
-
-              <button
-                onClick={onPrebookClick}
-                className={cn(
-                  "px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 text-sm shadow-lg hover:shadow-xl hover:scale-105 active:scale-95",
-                  prebookData 
-                    ? "bg-green-500 text-white" 
-                    : "bg-accent text-white"
-                )}
-              >
-                {prebookData ? <CheckCircle size={16} /> : <Calendar size={16} />}
-                {prebookData ? "Pre-booked" : "Pre-book"}
-              </button>
 
               <button
                 onClick={onProfileClick}
