@@ -1,6 +1,5 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  darkMode: ["class"],
   content: [
     './pages/**/*.{ts,tsx}',
     './components/**/*.{ts,tsx}',
@@ -18,43 +17,47 @@ module.exports = {
     },
     extend: {
       colors: {
-        border: "#E5E7EB",
-        input: "#E5E7EB",
-        ring: "#0B2545",
-        background: "#FFFFFF",
-        foreground: "#1F2937",
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: "#0B2545",
-          foreground: "#FFFFFF",
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
         },
         secondary: {
-          DEFAULT: "#F3F4F6",
-          foreground: "#1F2937",
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
         },
         accent: {
-          DEFAULT: "#0D9F6C",
-          foreground: "#FFFFFF",
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
         },
         destructive: {
-          DEFAULT: "#C53030",
-          foreground: "#FFFFFF",
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
-          DEFAULT: "#F9FAFB",
-          foreground: "#6B7280",
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
         },
         card: {
-          DEFAULT: "#FFFFFF",
-          foreground: "#1F2937",
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
         },
-        discovery: "#F6C84C",
-        navy: "#0B2545",
-        green: "#0D9F6C",
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        discovery: "hsl(var(--discovery))",
+        navy: "hsl(var(--navy))",
+        green: "hsl(var(--green))",
       },
       borderRadius: {
-        lg: "12px",
-        md: "8px",
-        sm: "4px",
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

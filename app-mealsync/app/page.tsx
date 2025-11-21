@@ -4,9 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { 
   Search, Bookmark, ChevronRight, X, Star, Leaf, 
   AlertTriangle, Calendar, User, LogOut, Utensils, CheckCircle,
-  Plus, Minus, Trophy, ShoppingBag, Clock, MapPin, Users, Package
+  Plus, Minus, Trophy, ShoppingBag, Clock, MapPin, Users, Package, Zap, Timer
 } from 'lucide-react';
 import Toast from '@/components/Toast';
+import { OrderTrackingModal } from '@/components/OrderTrackingModal';
 import { cn, getTodayString, getTomorrowString, isPastCutoff } from '@/lib/utils';
 
 interface MenuItem {
@@ -162,6 +163,11 @@ export default function MealSyncApp() {
   const [meetingOrders, setMeetingOrders] = useState<MeetingOrder[]>([]);
   const [deliveryOption, setDeliveryOption] = useState<'silent' | 'notify'>('notify');
   const [customDeliveryTime, setCustomDeliveryTime] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showDiscoveryOnly, setShowDiscoveryOnly] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [trackingOrder, setTrackingOrder] = useState<any>(null);
 
   const devMode = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
   const todayString = getTodayString();
@@ -240,6 +246,12 @@ export default function MealSyncApp() {
         body: JSON.stringify({ email }),
       });
       
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
+        setToast({ message: errorData.error || `Login failed: ${res.status}`, type: 'error' });
+        return;
+      }
+      
       const data = await res.json();
       if (data.user) {
         // Mock adding green credits if not present
@@ -249,9 +261,12 @@ export default function MealSyncApp() {
         localStorage.setItem('mealsync_user', JSON.stringify(data.user));
         setShowLoginModal(false);
         setToast({ message: `Welcome, ${data.user.displayName}!`, type: 'success' });
+      } else {
+        setToast({ message: 'User data not found in response', type: 'error' });
       }
     } catch (error) {
-      setToast({ message: 'Login failed', type: 'error' });
+      console.error('Login error:', error);
+      setToast({ message: `Login failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: 'error' });
     }
   };
 
@@ -356,6 +371,10 @@ export default function MealSyncApp() {
           
           // Close modal if open
           setSelectedItem(null);
+          
+          // Show tracking modal immediately
+          setTrackingOrder(order);
+          setShowTrackingModal(true);
       }, 1500);
   };
 
@@ -462,6 +481,10 @@ export default function MealSyncApp() {
     setDeliveryOption('notify');
     setCustomDeliveryTime('');
 
+    // Show tracking modal immediately
+    setTrackingOrder(order);
+    setShowTrackingModal(true);
+
     // Simulate status changes
     setTimeout(() => {
       updateOrderStatus(order.id, 'out-for-delivery');
@@ -480,6 +503,11 @@ export default function MealSyncApp() {
     );
     setOrderHistory(updatedHistory);
     localStorage.setItem('mealsync_orders', JSON.stringify(updatedHistory));
+
+    // Update tracking order if modal is open
+    if (trackingOrder && trackingOrder.id === orderId) {
+      setTrackingOrder({ ...trackingOrder, status });
+    }
 
     const statusMessages = {
       'out-for-delivery': 'Your order is out for delivery!',
@@ -550,6 +578,7 @@ export default function MealSyncApp() {
         if (activeFilters.includes('Veg') && item.diet_tags.includes('Veg')) return true;
         if (activeFilters.includes('Non-Veg') && item.diet_tags.includes('Non-Veg')) return true;
         if (activeFilters.includes('Fasting') && item.fasting_compliant) return true;
+        if (activeFilters.includes('Discovery') && item.is_discovery_item) return true;
         if (activeFilters.includes('High Protein') && item.protein_tag === 'High Protein') return true;
         if (activeFilters.includes('No Allergens') && item.allergens.length === 0) return true;
         return false;
@@ -570,6 +599,12 @@ export default function MealSyncApp() {
 
     return filtered;
   }, [items, searchQuery, activeFilters, showAllergenItems, user, viewSurplusOnly]);
+
+  const discoveryItems = useMemo(() => {
+    return items.filter(item => item.is_discovery_item && item.is_active);
+  }, [items]);
+
+  const discoveryCount = discoveryItems.length;
 
   const hasSurplusItems = useMemo(() => {
     // Only show surplus items if viewing TODAY's menu
@@ -601,24 +636,21 @@ export default function MealSyncApp() {
 
   if (showLoginModal) {
     return (
-      <div className="min-h-screen bg-secondary flex items-center justify-center">
-        <div className="bg-white p-8 rounded-xl shadow-card max-w-md w-full border border-gray-100">
-          <h1 className="text-3xl font-heading text-navy mb-6 text-center">MealSync</h1>
-          <p className="text-gray-500 text-center mb-8">Sign in to manage your meals</p>
-          <div className="space-y-4">
-            <button
-              onClick={() => handleLogin('asha@example.com')}
-              className="w-full py-3.5 px-4 bg-navy text-white rounded-lg font-medium hover:bg-navy/90 transition-colors shadow-md"
-            >
-              Sign in as Asha (Veg)
-            </button>
-            <button
-              onClick={() => handleLogin('rajesh@example.com')}
-              className="w-full py-3.5 px-4 bg-white text-navy border border-navy/20 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-            >
-              Sign in as Rajesh (Non-Veg)
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white p-10 rounded-2xl shadow-2xl max-w-md w-full border border-gray-100">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Utensils size={40} className="text-white" />
+            </div>
+            <h1 className="text-4xl font-heading text-navy mb-2">MealSync</h1>
+            <p className="text-gray-500">Your smart cafeteria companion</p>
           </div>
+          <button
+            onClick={() => handleLogin('user@example.com')}
+            className="w-full py-4 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl transform hover:scale-[1.02] active:scale-[0.98]"
+          >
+            Sign In
+          </button>
         </div>
       </div>
     );
@@ -638,6 +670,9 @@ export default function MealSyncApp() {
     onLeaderboardClick: () => setShowLeaderboard(true),
     onOrdersClick: () => setShowOrdersModal(true),
     onMeetingBookingClick: () => setShowMeetingBooking(true),
+    showDatePicker,
+    onToggleDatePicker: () => setShowDatePicker(!showDatePicker),
+    onProfileClick: () => setShowProfileModal(true),
   };
 
   if (showFastingView) {
@@ -719,6 +754,10 @@ export default function MealSyncApp() {
                 onCancel={handleCancelPrebook}
                 meetingOrders={meetingOrders}
                 onConfirmReceipt={handleConfirmReceipt}
+                onTrackOrder={(order: any) => {
+                    setTrackingOrder(order);
+                    setShowTrackingModal(true);
+                }}
             />
         )}
 
@@ -847,6 +886,7 @@ export default function MealSyncApp() {
           onFilterToggle={toggleFilter}
           showAllergenItems={showAllergenItems}
           onToggleAllergenItems={setShowAllergenItems}
+          discoveryCount={discoveryCount}
         />
 
         {viewSurplusOnly && (
@@ -943,6 +983,17 @@ export default function MealSyncApp() {
               onCancel={handleCancelPrebook}
               meetingOrders={meetingOrders}
               onConfirmReceipt={handleConfirmReceipt}
+              onTrackOrder={(order: any) => {
+                  setTrackingOrder(order);
+                  setShowTrackingModal(true);
+              }}
+          />
+      )}
+
+      {showProfileModal && (
+          <ProfileModal 
+              onClose={() => setShowProfileModal(false)} 
+              user={user!}
           />
       )}
 
@@ -987,20 +1038,38 @@ function Header({
   onLeaderboardClick,
   onOrdersClick,
   onMeetingBookingClick,
+  showDatePicker,
+  onToggleDatePicker,
+  onProfileClick,
 }: any) {
   const today = getTodayString();
   const tomorrow = getTomorrowString();
+  const [tempDate, setTempDate] = useState(selectedDate);
+
+  const formatDisplayDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    if (dateStr === today) return 'Today';
+    if (dateStr === tomorrow) return 'Tomorrow';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const handleDateSelect = (days: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    const dateStr = date.toISOString().split('T')[0];
+    onDateChange(dateStr);
+  };
 
   return (
     <header className="bg-navy text-white shadow-lg sticky top-0 z-40">
       <div className="container mx-auto px-4 py-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-8">
-            <h1 className="text-2xl font-heading tracking-wider">CanteenClear</h1>
+            <h1 className="text-2xl font-heading tracking-wider">MealSync</h1>
             
             {devMode && (
               <div className="hidden md:flex items-center gap-2 bg-white/10 px-3 py-1 rounded-lg">
-                <label className="text-xs text-white/70 font-medium">DEMO</label>
+                <label className="text-xs text-white/70 font-medium">Your Calendar</label>
                 <select
                   value={meetingSimulation}
                   onChange={(e) => onMeetingChange(e.target.value)}
@@ -1016,25 +1085,57 @@ function Header({
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-1 bg-white/10 rounded-lg p-1">
+            <div className="relative">
               <button
-                onClick={() => onDateChange(today)}
-                className={cn(
-                  'px-4 py-1.5 rounded-md text-sm font-medium transition-all',
-                  selectedDate === today ? 'bg-white text-navy shadow-sm' : 'hover:bg-white/5 text-white/80'
-                )}
+                onClick={onToggleDatePicker}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-all"
               >
-                Today
+                <Calendar size={18} />
+                <span className="font-medium">{formatDisplayDate(selectedDate)}</span>
               </button>
-              <button
-                onClick={() => onDateChange(tomorrow)}
-                className={cn(
-                  'px-4 py-1.5 rounded-md text-sm font-medium transition-all',
-                  selectedDate === tomorrow ? 'bg-white text-navy shadow-sm' : 'hover:bg-white/5 text-white/80'
-                )}
-              >
-                Tomorrow
-              </button>
+              
+              {showDatePicker && (
+                <div className="absolute top-full mt-2 right-0 bg-white text-gray-900 rounded-xl shadow-2xl border border-gray-200 p-4 w-80 z-50">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-bold text-navy">Select Date</h3>
+                    <button onClick={onToggleDatePicker} className="text-gray-400 hover:text-navy">
+                      <X size={20} />
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      onClick={() => { handleDateSelect(0); onToggleDatePicker(); }}
+                      className="py-2 px-3 rounded-lg bg-blue-50 text-blue-900 hover:bg-blue-100 font-medium text-sm"
+                    >
+                      Today
+                    </button>
+                    <button
+                      onClick={() => { handleDateSelect(1); onToggleDatePicker(); }}
+                      className="py-2 px-3 rounded-lg bg-green-50 text-green-900 hover:bg-green-100 font-medium text-sm"
+                    >
+                      Tomorrow
+                    </button>
+                  </div>
+
+                  <div className="border-t border-gray-200 pt-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Pick a date</label>
+                    <input
+                      type="date"
+                      value={tempDate}
+                      onChange={(e) => setTempDate(e.target.value)}
+                      min={today}
+                      className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <button
+                      onClick={() => { onDateChange(tempDate); onToggleDatePicker(); }}
+                      className="w-full mt-3 py-2 bg-navy text-white rounded-lg hover:bg-navy/90 font-medium"
+                    >
+                      Apply Date
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-3">
@@ -1078,6 +1179,14 @@ function Header({
               </button>
 
               <button
+                onClick={onProfileClick}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/80 hover:text-white"
+                title="Profile"
+               >
+                 <User size={20} />
+               </button>
+
+              <button
                 onClick={onLogout}
                 className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white/80 hover:text-white"
                 aria-label="Sign out"
@@ -1092,10 +1201,14 @@ function Header({
   );
 }
 
-function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onConfirmReceipt }: any) {
+function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onConfirmReceipt, onTrackOrder }: any) {
     const sortedBookings = [...bookings].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    const sortedOrders = [...orders].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    const sortedMeetingOrders = [...(meetingOrders || [])].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    // Combine Surplus Orders and Meeting Orders into one unified list
+    const combinedHistory = [
+      ...orders.map((o: any) => ({ ...o, _sortDate: new Date(o.date || o.createdAt) })),
+      ...(meetingOrders || []).map((o: any) => ({ ...o, _sortDate: new Date(o.createdAt), type: 'meeting' }))
+    ].sort((a, b) => b._sortDate.getTime() - a._sortDate.getTime());
 
     return (
         <div
@@ -1103,27 +1216,28 @@ function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onCon
           onClick={onClose}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-gray-100"
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-gray-100 dark:border-slate-800 max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6 space-y-6">
-                <div className="flex justify-between items-start">
+            <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                <div className="flex justify-between items-start sticky top-0 bg-white dark:bg-slate-900 z-10 pb-4 border-b border-gray-100 dark:border-slate-800">
                     <div>
-                        <p className="text-sm uppercase text-gray-400 tracking-wide font-semibold">My Activity</p>
-                        <h2 className="text-2xl font-heading text-navy">Orders & Pre-bookings</h2>
+                        <p className="text-sm uppercase text-gray-400 dark:text-slate-500 tracking-wide font-semibold">My Activity</p>
+                        <h2 className="text-2xl font-heading text-navy dark:text-white">Orders & Pre-bookings</h2>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-navy"><X size={24} /></button>
+                    <button onClick={onClose} className="text-gray-400 hover:text-navy dark:hover:text-white p-1 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"><X size={24} /></button>
                 </div>
 
                 <section>
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Upcoming Pre-bookings</h3>
+                    <h3 className="text-sm font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <Calendar size={14} /> Upcoming Pre-bookings
+                    </h3>
                     {sortedBookings.length === 0 ? (
-                        <div className="text-center py-6 text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                            <Calendar size={40} className="mx-auto mb-2 text-gray-300" />
+                        <div className="text-center py-6 text-gray-500 dark:text-slate-500 border border-dashed border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50/50 dark:bg-slate-800/30">
                             <p>No active pre-bookings.</p>
                         </div>
                     ) : (
-                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                        <div className="space-y-3">
                             {sortedBookings.map((booking) => {
                                 const bookingDate = new Date(booking.date);
                                 const isToday = new Date().toDateString() === bookingDate.toDateString();
@@ -1136,22 +1250,22 @@ function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onCon
                                 if (isTomorrow) dateLabel = "Tomorrow";
 
                                 return (
-                                    <div key={booking.id} className="bg-gray-50 rounded-xl p-4 border border-gray-100 flex justify-between items-center">
+                                    <div key={booking.id} className="bg-gray-50 dark:bg-slate-800/50 rounded-xl p-4 border border-gray-100 dark:border-slate-700 flex justify-between items-center">
                                         <div>
                                             <div className="flex items-center gap-2 mb-1">
-                                                <span className="font-bold text-navy text-lg">{dateLabel}</span>
-                                                <span className="text-xs text-gray-400 font-medium uppercase tracking-wide">{booking.date}</span>
+                                                <span className="font-bold text-navy dark:text-white text-lg">{dateLabel}</span>
+                                                <span className="text-xs text-gray-400 dark:text-slate-500 font-medium uppercase tracking-wide">{booking.date}</span>
                                             </div>
-                                            <p className="text-gray-700 font-medium">
+                                            <p className="text-gray-700 dark:text-slate-300 font-medium">
                                                 {booking.item_id ? "Specific Item Reserved" : booking.item_category}
                                             </p>
-                                            <p className="text-xs text-gray-500 mt-1">Quantity: {booking.quantity}</p>
+                                            <p className="text-xs text-gray-500 dark:text-slate-500 mt-1">Quantity: {booking.quantity}</p>
                                         </div>
                                         
                                         {isTomorrow && (
                                             <button 
                                                 onClick={() => onCancel(booking.id)}
-                                                className="text-red-500 hover:text-red-700 text-sm font-medium px-3 py-1.5 hover:bg-red-50 rounded-lg transition-colors"
+                                                className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-sm font-medium px-3 py-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                             >
                                                 Cancel
                                             </button>
@@ -1164,84 +1278,88 @@ function OrdersModal({ onClose, bookings, orders, onCancel, meetingOrders, onCon
                 </section>
 
                 <section>
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Meeting Orders</h3>
-                    {sortedMeetingOrders.length === 0 ? (
-                        <div className="text-center py-6 text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                            <Utensils size={32} className="mx-auto mb-2 text-gray-300" />
-                            <p>No meeting orders yet.</p>
+                    <h3 className="text-sm font-semibold text-gray-500 dark:text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <Clock size={14} /> Order History
+                    </h3>
+                    {combinedHistory.length === 0 ? (
+                        <div className="text-center py-8 text-gray-500 dark:text-slate-500 border border-dashed border-gray-200 dark:border-slate-700 rounded-xl bg-gray-50/50 dark:bg-slate-800/30">
+                            <Utensils size={32} className="mx-auto mb-2 text-gray-300 dark:text-slate-600" />
+                            <p>No past orders found.</p>
                         </div>
                     ) : (
-                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                            {sortedMeetingOrders.map(order => {
-                                const statusConfig = {
-                                    'preparing': { label: 'Preparing', color: 'text-yellow-600 bg-yellow-50', icon: Clock },
-                                    'out-for-delivery': { label: 'Out for Delivery', color: 'text-blue-600 bg-blue-50', icon: Package },
-                                    'delivered': { label: 'Delivered', color: 'text-green-600 bg-green-50', icon: CheckCircle }
-                                };
-                                const config = statusConfig[order.status];
-                                const StatusIcon = config.icon;
+                        <div className="space-y-4">
+                            {combinedHistory.map((order: any) => {
+                                const isMeeting = order.type === 'meeting' || (order.items && order.items.length > 0);
                                 
                                 return (
-                                    <div key={order.id} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <div className="flex-1">
-                                                <p className="text-navy font-semibold text-sm mb-1">
-                                                    {order.items.map((item: any) => item.itemName).join(', ')}
+                                    <div key={order.id} className={cn(
+                                        "rounded-xl p-4 border shadow-sm transition-all hover:shadow-md",
+                                        isMeeting 
+                                            ? "bg-gradient-to-br from-white to-blue-50/30 dark:from-slate-800 dark:to-slate-800/50 border-blue-100 dark:border-slate-700" 
+                                            : "bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700"
+                                    )}>
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    {isMeeting ? (
+                                                        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px] font-bold uppercase tracking-wide">
+                                                            Meeting
+                                                        </span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-[10px] font-bold uppercase tracking-wide">
+                                                            Surplus
+                                                        </span>
+                                                    )}
+                                                    <span className="text-xs text-gray-400 dark:text-slate-500">
+                                                        {new Date(order.date || order.createdAt).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                                <p className="text-navy dark:text-white font-bold text-base">
+                                                    {isMeeting 
+                                                        ? order.items.map((i: any) => i.itemName).join(', ') 
+                                                        : order.itemName}
                                                 </p>
-                                                <p className="text-xs text-gray-500">
-                                                    {new Date(order.createdAt).toLocaleString()}
+                                                <p className="text-sm text-gray-500 dark:text-slate-400 mt-0.5">
+                                                    Total: ₹{order.price || order.totalPrice}
                                                 </p>
                                             </div>
-                                            <div className={cn("flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium", config.color)}>
-                                                <StatusIcon size={12} />
-                                                {config.label}
-                                            </div>
-                                        </div>
-                                        <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100">
-                                            <div className="text-sm">
-                                                <span className="text-gray-600">Total: </span>
-                                                <span className="font-bold text-navy">₹{order.totalPrice}</span>
-                                            </div>
-                                            {order.status === 'delivered' && !order.confirmedAt && (
-                                                <button
-                                                    onClick={() => onConfirmReceipt(order.id)}
-                                                    className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-medium"
-                                                >
-                                                    Confirm Receipt
-                                                </button>
-                                            )}
-                                            {order.confirmedAt && (
-                                                <span className="text-xs text-green-600 font-medium">✓ Received</span>
+                                            {order.status && order.status !== 'delivered' && (
+                                                <span className="flex h-3 w-3 relative">
+                                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-sky-500"></span>
+                                                </span>
                                             )}
                                         </div>
+
+                                        {(order.status && order.status !== 'delivered' && order.status !== 'cancelled') && (
+                                            <button
+                                                onClick={() => onTrackOrder(order)}
+                                                className="w-full mt-2 py-2.5 bg-navy text-white dark:bg-primary dark:text-primary-foreground rounded-lg hover:bg-navy/90 font-medium text-sm shadow-sm transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                                            >
+                                                <Package size={16} />
+                                                Track Live Status
+                                            </button>
+                                        )}
+
+                                        {order.status === 'delivered' && !order.confirmedAt && isMeeting && (
+                                            <button
+                                                onClick={() => onConfirmReceipt(order.id)}
+                                                className="w-full mt-2 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg hover:from-green-600 hover:to-emerald-600 font-medium text-sm shadow-md transition-all"
+                                            >
+                                                ✓ Confirm Receipt
+                                            </button>
+                                        )}
+                                        
+                                        {order.confirmedAt && (
+                                            <div className="mt-3 text-center py-1.5 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-900/30">
+                                                <span className="text-xs text-green-700 dark:text-green-400 font-bold flex items-center justify-center gap-1">
+                                                    <CheckCircle size={12} /> Completed
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             })}
-                        </div>
-                    )}
-                </section>
-
-                <section>
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent Surplus Purchases</h3>
-                    {sortedOrders.filter(o => o.type === 'surplus').length === 0 ? (
-                        <div className="text-center py-6 text-gray-500 border border-dashed border-gray-200 rounded-xl">
-                            <Leaf size={32} className="mx-auto mb-2 text-gray-300" />
-                            <p>No surplus items purchased yet.</p>
-                        </div>
-                    ) : (
-                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                            {sortedOrders.filter(o => o.type === 'surplus').map(order => (
-                                <div key={order.id} className="bg-white rounded-xl p-4 border border-gray-100 flex justify-between items-center shadow-sm">
-                                    <div>
-                                        <p className="text-navy font-semibold">{order.itemName}</p>
-                                        <p className="text-xs text-gray-500">Purchased on {new Date(order.date).toLocaleString()}</p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-sm font-bold text-gray-700">Qty: {order.quantity}</p>
-                                        <p className="text-xs text-green-600 font-semibold">₹{order.price}</p>
-                                    </div>
-                                </div>
-                            ))}
                         </div>
                     )}
                 </section>
@@ -1258,9 +1376,9 @@ function FiltersBar({
   onFilterToggle,
   showAllergenItems,
   onToggleAllergenItems,
+  discoveryCount,
 }: any) {
-  // ... (Same as before) ...
-  const filters = ['All', 'Veg', 'Non-Veg', 'Fasting', 'High Protein', 'No Allergens'];
+  const filters = ['All', 'Veg', 'Non-Veg', 'Fasting', 'Discovery', 'High Protein', 'No Allergens'];
 
   return (
     <div className="space-y-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -1283,14 +1401,24 @@ function FiltersBar({
               key={filter}
               onClick={() => onFilterToggle(filter)}
               className={cn(
-                'px-4 py-2 rounded-full border text-sm font-medium transition-all active:scale-95',
+                'px-4 py-2 rounded-full border text-sm font-medium transition-all active:scale-95 relative',
                 activeFilters.includes(filter)
-                  ? 'bg-navy text-white border-navy shadow-md'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-navy/50 hover:text-navy'
+                  ? filter === 'Discovery' 
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white border-orange-500 shadow-lg'
+                    : 'bg-navy text-white border-navy shadow-md'
+                  : filter === 'Discovery'
+                    ? 'bg-gradient-to-r from-orange-50 to-red-50 text-orange-700 border-orange-200 hover:border-orange-400'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-navy/50 hover:text-navy'
               )}
             >
               {filter === 'Veg' && <Leaf size={14} className="inline mr-1.5 mb-0.5" />}
+              {filter === 'Discovery' && <Zap size={14} className="inline mr-1.5 mb-0.5" />}
               {filter}
+              {filter === 'Discovery' && discoveryCount > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.5 bg-white/30 rounded-full text-xs font-bold">
+                  {discoveryCount}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1308,6 +1436,47 @@ function FiltersBar({
           <span className="text-sm font-medium text-gray-700">Show allergen items</span>
         </label>
       </div>
+    </div>
+  );
+}
+
+function DiscoveryTimer() {
+  const [timeLeft, setTimeLeft] = useState({ hours: 2, minutes: 30, seconds: 0 });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        let { hours, minutes, seconds } = prev;
+        
+        if (seconds > 0) {
+          seconds--;
+        } else if (minutes > 0) {
+          minutes--;
+          seconds = 59;
+        } else if (hours > 0) {
+          hours--;
+          minutes = 59;
+          seconds = 59;
+        }
+        
+        return { hours, minutes, seconds };
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200">
+      <Timer size={14} className="text-orange-600" />
+      <div className="flex items-center gap-1 text-xs font-mono font-bold text-orange-700">
+        <span>{String(timeLeft.hours).padStart(2, '0')}</span>
+        <span className="text-orange-400">:</span>
+        <span>{String(timeLeft.minutes).padStart(2, '0')}</span>
+        <span className="text-orange-400">:</span>
+        <span>{String(timeLeft.seconds).padStart(2, '0')}</span>
+      </div>
+      <span className="text-[10px] uppercase text-orange-600 font-bold tracking-wide">Left</span>
     </div>
   );
 }
@@ -1347,9 +1516,9 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60" />
 
         {item.is_discovery_item && (
-          <div className="absolute top-3 left-3 bg-discovery text-navy px-3 py-1 rounded-full flex items-center gap-1 shadow-md">
-            <Star size={14} fill="currentColor" />
-            <span className="text-xs font-bold uppercase">Special</span>
+          <div className="absolute top-3 left-3 bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-lg animate-pulse">
+            <Zap size={14} fill="currentColor" />
+            <span className="text-xs font-bold uppercase tracking-wide">Discovery</span>
           </div>
         )}
 
@@ -1397,6 +1566,12 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
         </div>
         
         <p className="text-sm text-gray-500 mb-4 line-clamp-2 h-10">{item.description}</p>
+
+        {item.is_discovery_item && (
+          <div className="mb-4" onClick={(e) => e.stopPropagation()}>
+            <DiscoveryTimer />
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2 mb-5">
           {item.diet_tags.map((tag: string) => (
@@ -1845,6 +2020,94 @@ function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: 
               )}
             </>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileModal({ onClose, user }: any) {
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-100"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6 space-y-6">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm uppercase text-gray-400 tracking-wide font-semibold">My Profile</p>
+              <h2 className="text-2xl font-heading text-navy">{user.displayName}</h2>
+            </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-navy">
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+                {user.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1">
+                <p className="font-bold text-navy text-lg">{user.displayName}</p>
+                <p className="text-sm text-gray-600">{user.email}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Green Credits</p>
+                <p className="text-2xl font-bold text-green-600 flex items-center gap-1">
+                  <Leaf size={20} />
+                  {user.green_credits || 0}
+                </p>
+              </div>
+              <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Status</p>
+                <p className="text-lg font-bold text-navy capitalize">{user.office_status}</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Diet Preferences</p>
+              <div className="flex flex-wrap gap-2">
+                {user.diet_profile.map((diet: string) => (
+                  <span
+                    key={diet}
+                    className={cn(
+                      "px-3 py-1 rounded-full text-xs font-semibold",
+                      diet === 'Veg' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    )}
+                  >
+                    {diet}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {user.allergies && user.allergies.length > 0 && (
+              <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+                <p className="text-xs text-red-500 uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <AlertTriangle size={14} />
+                  Allergies
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {user.allergies.map((allergy: string) => (
+                    <span
+                      key={allergy}
+                      className="px-3 py-1 bg-white rounded-full text-xs font-semibold text-red-700 border border-red-200"
+                    >
+                      {allergy}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
