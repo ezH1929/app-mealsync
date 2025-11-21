@@ -302,19 +302,49 @@ export default function MealSyncApp() {
   const handlePrebook = async (category: string, itemId: string | null = null, qty: number = 1) => {
     if (!user) return;
 
-    const tomorrow = getTomorrowString();
-    const cutoffHour = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_HOUR || '10');
-    const cutoffMinute = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_MINUTE || '30');
+    // Use selectedDate instead of hardcoded tomorrow
+    const targetDate = selectedDate;
+    const isToday = targetDate === getTodayString();
 
-    if (isPastCutoff(cutoffHour, cutoffMinute)) {
-      setToast({ message: 'Pre-booking closed for tomorrow', type: 'error' });
-      return;
+    // Cutoff check for today's orders
+    if (isToday) {
+        const cutoffHour = 10;
+        const cutoffMinute = 30;
+        if (isPastCutoff(cutoffHour, cutoffMinute)) {
+            setToast({ message: 'Pre-booking closed for today (Cutoff 10:30 AM)', type: 'error' });
+            return;
+        }
+        // Also check if trying to prebook for today which is generally disabled unless surplus?
+        // The requirement says "pre-book cutoff time should be 10:30am for the same day".
+        // This implies prebooking IS allowed for today before 10:30am.
+        // BUT we previously added a check: "Cannot pre-book for today. Please order directly."
+        // If the user means "Buy Now" for today needs a cutoff, that's different.
+        // Assuming the requirement means: "You can pre-book for today until 10:30am, after that only Buy Now (Surplus) is allowed?"
+        // Or does it mean "You can't pre-book for today, and the cutoff logic applies to...?"
+        
+        // Re-reading: "for the same day, pre-book cutoff time should be 10:30am."
+        // This likely means if I am booking FOR today, I must do it before 10:30am.
+        // So we should remove the "Cannot pre-book for today" block if we want to allow it before 10:30.
     }
+    
+    // Only block if it is today AND past cutoff.
+    if (isToday) {
+        const cutoffHour = 10;
+        const cutoffMinute = 30;
+        if (isPastCutoff(cutoffHour, cutoffMinute)) {
+             setToast({ message: 'Pre-booking closed for today (Cutoff 10:30 AM). Check surplus items.', type: 'error' });
+             return;
+        }
+    }
+    
+    // Prevent prebooking for today check - REMOVED to allow prebooking before cutoff
+    // if (targetDate === getTodayString()) {
+    //    setToast({ message: 'Cannot pre-book for today. Please order directly.', type: 'error' });
+    //    return;
+    // }
 
-    if (prebookData) {
-        setToast({ message: 'You already have a pre-book. Cancel it first to change.', type: 'info' });
-        return;
-    }
+    // Allow multiple prebooks - removed the check for existing prebookData
+    // if (prebookData) { ... }
 
     try {
       const res = await fetch('/api/prebook', {
@@ -322,7 +352,7 @@ export default function MealSyncApp() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.id,
-          date: tomorrow,
+          date: targetDate,
           item_id: itemId,
           item_category: category,
           quantity: qty
@@ -331,7 +361,8 @@ export default function MealSyncApp() {
       
       const data = await res.json();
       if (data.prebook) {
-        setPrebookData(data.prebook);
+        // We update prebookData to the latest one to show confirmation if needed
+        setPrebookData(data.prebook); 
         setAllPrebooks([...allPrebooks, data.prebook]);
         setShowPrebookModal(false);
         setToast({ message: data.message, type: 'success' });
@@ -348,11 +379,16 @@ export default function MealSyncApp() {
       setToast({ message: `Processing purchase for ${quantity} x ${item.name}...`, type: 'info' });
       
       setTimeout(() => {
-          setToast({ message: `Successfully purchased! +${quantity * 5} Green Credits earned.`, type: 'success' });
+          const creditsEarned = item.is_surplus_candidate ? quantity * 5 : 0;
+          const successMessage = creditsEarned > 0 
+            ? `Successfully purchased! +${creditsEarned} Green Credits earned.`
+            : `Successfully purchased!`;
+
+          setToast({ message: successMessage, type: 'success' });
           
           // Update local green credits for immediate feedback
-          if (user) {
-              const updatedUser = { ...user, green_credits: (user.green_credits || 0) + (quantity * 5) };
+          if (user && creditsEarned > 0) {
+              const updatedUser = { ...user, green_credits: (user.green_credits || 0) + creditsEarned };
               setUser(updatedUser);
               localStorage.setItem('mealsync_user', JSON.stringify(updatedUser));
           }
@@ -617,7 +653,7 @@ export default function MealSyncApp() {
   }, [items]);
 
   const isPrebookPrebooked = (itemId: string) => {
-    return prebookData?.item_id === itemId;
+    return allPrebooks.some(p => p.item_id === itemId && p.date === selectedDate);
   };
 
   const handleNavratriClick = () => {
@@ -713,7 +749,7 @@ export default function MealSyncApp() {
                   onClick={() => setSelectedItem(item)}
                   onPrebook={(id: string, qty: number) => handlePrebook(item.category, id, qty)}
                   isPrebooked={isPrebookPrebooked(item.id)}
-                  hasPrebook={!!prebookData}
+                  hasPrebook={false}
                   onBuyNow={null}
                   isFastingView={true}
                 />
@@ -737,7 +773,7 @@ export default function MealSyncApp() {
             onAllergenAcknowledgment={setAllergenAcknowledgment}
             onPrebook={(qty: number) => handlePrebook(selectedItem.category, selectedItem.id, qty)}
             isPrebooked={isPrebookPrebooked(selectedItem.id)}
-            hasPrebook={!!prebookData}
+            hasPrebook={false}
             onBuyNow={(qty: number) => handleDirectBuy(selectedItem, qty)}
           />
         )}
@@ -909,7 +945,7 @@ export default function MealSyncApp() {
               onClick={() => setSelectedItem(item)}
               onPrebook={(id: string, qty: number) => handlePrebook(item.category, id, qty)}
               isPrebooked={isPrebookPrebooked(item.id)}
-              hasPrebook={!!prebookData}
+              hasPrebook={false}
               onBuyNow={(qty: number) => handleDirectBuy(item, qty)}
             />
           ))}
@@ -957,7 +993,7 @@ export default function MealSyncApp() {
           onAllergenAcknowledgment={setAllergenAcknowledgment}
           onPrebook={(qty: number) => handlePrebook(selectedItem.category, selectedItem.id, qty)}
           isPrebooked={isPrebookPrebooked(selectedItem.id)}
-          hasPrebook={!!prebookData}
+          hasPrebook={false}
           onBuyNow={(qty: number) => handleDirectBuy(selectedItem, qty)}
         />
       )}
@@ -1485,6 +1521,10 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
   const isSoldOut = item.available_qty <= 0;
   const maxQuantity = Math.max(1, Math.min(item.available_qty, 5));
   const [quantity, setQuantity] = useState(1);
+  const isToday = getTodayString() === new Date().toISOString().split('T')[0]; 
+  const cutoffHour = 10;
+  const cutoffMinute = 30;
+  const isPastCutoffTime = isToday && isPastCutoff(cutoffHour, cutoffMinute);
 
   const handleQuantityChange = (e: React.MouseEvent, delta: number) => {
       e.stopPropagation();
@@ -1615,7 +1655,8 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
             >
                 Details
             </button>
-            {item.is_surplus_candidate && !isFastingView && onBuyNow ? (
+            {/* If surplus, always allow Buy Now (Direct) */}
+            {item.is_surplus_candidate && onBuyNow ? (
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
@@ -1627,25 +1668,38 @@ function MenuCard({ item, isBookmarked, hasAllergen, showAllergenOverlay, onBook
                     Buy Now
                 </button>
             ) : (
+                // For standard items
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        onPrebook(item.id, quantity);
+                        if (isToday && isPastCutoffTime) {
+                           // Do nothing or show toast handled by parent, but button is disabled
+                        } else {
+                           onPrebook(item.id, quantity);
+                        }
                     }}
-                    disabled={isSoldOut || (hasPrebook && !isPrebooked)}
+                    // Disable if sold out OR (today and past cutoff) OR (has prebook logic...)
+                    disabled={isSoldOut || (isToday && isPastCutoffTime) || (hasPrebook && !isPrebooked)}
                     className={cn(
                         "flex-1 py-2.5 rounded-lg font-medium transition-all text-sm flex items-center justify-center gap-2",
-                        isPrebooked 
-                            ? "bg-green-600 text-white shadow-md"
-                            : hasPrebook
-                                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                                : "bg-navy text-white hover:bg-navy/90 shadow-md hover:shadow-lg"
+                        (isToday && isPastCutoffTime) 
+                            ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                            : isPrebooked 
+                                ? "bg-green-600 text-white shadow-md"
+                                : hasPrebook
+                                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                    : "bg-navy text-white hover:bg-navy/90 shadow-md hover:shadow-lg"
                     )}
                 >
                     {isPrebooked ? (
                         <>
                             <CheckCircle size={16} />
                             Pre-booked
+                        </>
+                    ) : (isToday && isPastCutoffTime) ? (
+                        <>
+                             <Clock size={16} />
+                             Closed
                         </>
                     ) : (
                         <>
@@ -1796,6 +1850,12 @@ function ItemDetailModal({
 
               <div className="pt-6 border-t border-gray-100">
                 <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <p className="text-sm text-gray-500 uppercase tracking-wide font-semibold mb-1">Price per meal</p>
+                    {item.is_surplus_candidate && (
+                      <p className="text-xs text-green-600 font-medium">Earn 5 Green Credits</p>
+                    )}
+                  </div>
                   <span className="text-3xl font-bold text-navy">₹{item.price}</span>
                   {isSoldOut && (
                     <span className="text-red-600 font-bold uppercase border-2 border-red-600 px-3 py-1 rounded rotate-[-5deg]">Sold out</span>
@@ -1852,12 +1912,12 @@ function ItemDetailModal({
                           {isPrebooked ? (
                               <>
                                 <CheckCircle size={20} />
-                                Pre-booked for Tomorrow
+                                Pre-booked
                               </>
                           ) : (
                               <>
                                 <Calendar size={20} />
-                                Pre-book for Tomorrow
+                                Pre-book
                               </>
                           )}
                         </button>
@@ -1931,9 +1991,25 @@ function LeaderboardModal({ onClose }: { onClose: () => void }) {
 }
 
 function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: any) {
-  const cutoffHour = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_HOUR || '10');
-  const cutoffMinute = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_MINUTE || '30');
-  const pastCutoff = isPastCutoff(cutoffHour, cutoffMinute);
+  // Removed cutoff logic for Tomorrow, but apply cutoff for Today
+  // const cutoffHour = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_HOUR || '10');
+  // const cutoffMinute = parseInt(process.env.NEXT_PUBLIC_PREBOOK_CUTOFF_MINUTE || '30');
+  // const pastCutoff = false; // Always allow prebooking/canceling 
+  // We are showing prebook confirmation modal mostly. 
+  // For cancelling today's prebook: if it is today and past cutoff, maybe disable?
+  
+  // This modal handles pre-booking for the SELECTED DATE.
+  // The parent component `MealSyncApp` handles `handlePrebook` logic which we updated.
+  // But `PrebookModal` also has a cancel button.
+  
+  // If I view a prebook for TODAY after 10:30, should I be able to cancel?
+  // Probably not if the cutoff implies "locked in".
+  
+  // Let's check if the existingPrebook date is today and if it is past cutoff.
+  const cutoffHour = 10;
+  const cutoffMinute = 30;
+  const isToday = existingPrebook?.date === getTodayString();
+  const pastCutoff = isToday && isPastCutoff(cutoffHour, cutoffMinute);
 
   return (
     <div
@@ -1965,7 +2041,9 @@ function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: 
                 {existingPrebook.quantity > 1 && (
                     <p className="text-sm font-bold text-green-800 mt-1">Quantity: {existingPrebook.quantity}</p>
                 )}
-                <p className="text-xs text-green-600 mt-2">For Tomorrow</p>
+                <p className="text-xs text-green-600 mt-2">
+                  For {new Date(existingPrebook.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                </p>
               </div>
 
               {!pastCutoff ? (
@@ -1977,7 +2055,7 @@ function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: 
                 </button>
               ) : (
                 <p className="text-sm text-gray-500 text-center bg-gray-50 py-2 rounded-lg">
-                  Cannot cancel after {cutoffHour}:{cutoffMinute.toString().padStart(2, '0')} AM
+                  Cannot cancel after {cutoffHour}:{cutoffMinute.toString().padStart(2, '0')} AM for same-day orders
                 </p>
               )}
             </div>
@@ -1985,39 +2063,31 @@ function PrebookModal({ onClose, onPrebook, existingPrebook, onCancelPrebook }: 
             <>
               <p className="text-sm text-gray-500 mb-6 bg-gray-50 p-3 rounded-lg border border-gray-100">
                 <span className="font-medium text-navy">Note:</span> Pre-booking guarantees your meal availability.
-                <br />Cutoff: {cutoffHour}:{cutoffMinute.toString().padStart(2, '0')} AM.
               </p>
 
-              {pastCutoff ? (
-                <div className="text-center py-8 bg-red-50 rounded-xl border border-red-100">
-                  <p className="text-red-600 font-medium">Pre-booking closed for tomorrow</p>
-                  <p className="text-red-400 text-sm mt-1">Please check back later</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <button
-                    onClick={() => onPrebook('Veg')}
-                    className="w-full py-4 px-4 bg-green-50 border border-green-100 text-green-800 rounded-xl hover:bg-green-100 transition-all flex items-center justify-between group"
-                  >
-                    <span className="font-bold">Standard Veg Meal</span>
-                    <ChevronRight className="text-green-600 group-hover:translate-x-1 transition-transform" size={20} />
-                  </button>
-                  <button
-                    onClick={() => onPrebook('Non-Veg')}
-                    className="w-full py-4 px-4 bg-red-50 border border-red-100 text-red-800 rounded-xl hover:bg-red-100 transition-all flex items-center justify-between group"
-                  >
-                    <span className="font-bold">Standard Non-Veg Meal</span>
-                    <ChevronRight className="text-red-600 group-hover:translate-x-1 transition-transform" size={20} />
-                  </button>
-                  <button
-                    onClick={() => onPrebook('Fasting')}
-                    className="w-full py-4 px-4 bg-purple-50 border border-purple-100 text-purple-800 rounded-xl hover:bg-purple-100 transition-all flex items-center justify-between group"
-                  >
-                    <span className="font-bold">Fasting / Navratri Meal</span>
-                    <ChevronRight className="text-purple-600 group-hover:translate-x-1 transition-transform" size={20} />
-                  </button>
-                </div>
-              )}
+              <div className="space-y-3">
+                <button
+                  onClick={() => onPrebook('Veg')}
+                  className="w-full py-4 px-4 bg-green-50 border border-green-100 text-green-800 rounded-xl hover:bg-green-100 transition-all flex items-center justify-between group"
+                >
+                  <span className="font-bold">Standard Veg Meal</span>
+                  <ChevronRight className="text-green-600 group-hover:translate-x-1 transition-transform" size={20} />
+                </button>
+                <button
+                  onClick={() => onPrebook('Non-Veg')}
+                  className="w-full py-4 px-4 bg-red-50 border border-red-100 text-red-800 rounded-xl hover:bg-red-100 transition-all flex items-center justify-between group"
+                >
+                  <span className="font-bold">Standard Non-Veg Meal</span>
+                  <ChevronRight className="text-red-600 group-hover:translate-x-1 transition-transform" size={20} />
+                </button>
+                <button
+                  onClick={() => onPrebook('Fasting')}
+                  className="w-full py-4 px-4 bg-purple-50 border border-purple-100 text-purple-800 rounded-xl hover:bg-purple-100 transition-all flex items-center justify-between group"
+                >
+                  <span className="font-bold">Fasting / Navratri Meal</span>
+                  <ChevronRight className="text-purple-600 group-hover:translate-x-1 transition-transform" size={20} />
+                </button>
+              </div>
             </>
           )}
         </div>
